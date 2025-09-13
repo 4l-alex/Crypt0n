@@ -22,7 +22,7 @@ Crypt0n è un bot Discord avanzato progettato per analisi di sicurezza informati
 ## Installazione
 1. Clona la repository:
    ```bash
-   git clone https://github.com/tuo_repo/crypt0n.git
+   git https://github.com/4l-alex/Crypt0n.git
    cd crypt0n
 
 2. Installa le dipendenze:
