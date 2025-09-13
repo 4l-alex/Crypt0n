@@ -34,7 +34,7 @@ logging.basicConfig(filename='bot.log', level=logging.INFO, format='%(asctime)s:
 
 # Carica variabili d'ambiente
 load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
+TOKEN = os.getenv('tua_chiave')
 VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY', 'tua_chiave')
 ABUSEIPDB_API_KEY = os.getenv('ABUSEIPDB_API_KEY', 'tua_chiave')
 HIBP_API_KEY = os.getenv('HIBP_API_KEY', 'tua_chiave')
@@ -48,6 +48,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS monitors (url TEXT, hash TEXT, user
 cursor.execute('''CREATE TABLE IF NOT EXISTS stats (command TEXT, count INTEGER)''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS prefixes (guild_id INTEGER PRIMARY KEY, prefix TEXT)''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS log_channels (guild_id INTEGER PRIMARY KEY, channel_id INTEGER)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS geoip_cache (ip TEXT PRIMARY KEY, data TEXT)''')
 conn.commit()
 
 # Bot personalizzato
@@ -79,6 +80,9 @@ class CustomBot(commands.Bot):
 
 # Definisci il bot
 bot = CustomBot(command_prefix=lambda bot, msg: bot.get_prefix(msg), intents=discord.Intents.all())
+
+# Rimuovi il comando $help predefinito
+bot.remove_command('help')
 
 # Carica prefissi
 cursor.execute('SELECT * FROM prefixes')
@@ -184,15 +188,26 @@ class AnalisiAvanzata(commands.Cog):
     @commands.command()
     async def geoip(self, ctx, ip: str):
         update_stats('geoip')
+        cursor.execute('SELECT data FROM geoip_cache WHERE ip = ?', (ip,))
+        cached = cursor.fetchone()
+        if cached:
+            data = json.loads(cached[0])
+            await self.bot.send_translated(ctx, f"GeoIP per {ip} (cache):\nCittà: {data['city']}\nPaese: {data['country']}\nISP: {data['isp']}")
+            return
         try:
             response = requests.get(f"{IP_API_URL}{ip}")
             data = response.json()
             if data['status'] == 'success':
+                cursor.execute('INSERT INTO geoip_cache (ip, data) VALUES (?, ?)', (ip, json.dumps(data)))
+                conn.commit()
                 await self.bot.send_translated(ctx, f"GeoIP per {ip}:\nCittà: {data['city']}\nPaese: {data['country']}\nISP: {data['isp']}")
             else:
                 await self.bot.send_translated(ctx, "Errore nella ricerca.")
         except Exception as e:
-            await self.bot.send_translated(ctx, f"Errore: {str(e)}")
+            if response.status_code == 429:
+                await self.bot.send_translated(ctx, "Limite di richieste superato. Riprova tra un minuto.")
+            else:
+                await self.bot.send_translated(ctx, f"Errore: {str(e)}")
 
     @commands.command()
     async def webtech(self, ctx, url: str):
@@ -516,14 +531,19 @@ class ComandiBase(commands.Cog):
     async def checkleak(self, ctx, query: str):
         update_stats('checkleak')
         if not HIBP_API_KEY:
-            return await self.bot.send_translated(ctx, "Configura HIBP_API_KEY!")
-        headers = {'hibp-api-key': HIBP_API_KEY, 'user-agent': 'discord-bot'}
+            return await self.bot.send_translated(ctx, "HIBP API non configurata. Usa $checkleak_manual per alternative.")
+        headers = {'hibp-api-key': HIBP_API_KEY, 'user-agent': 'Crypt0n-Bot'}
         response = requests.get(f'https://haveibeenpwned.com/api/v3/breachedaccount/{query}', headers=headers)
         if response.status_code == 200:
             breaches = ", ".join([b['Name'] for b in response.json()])
             await self.bot.send_translated(ctx, f"Filtrazioni per {query}: {breaches}")
         else:
             await self.bot.send_translated(ctx, "Nessuna filtrazione trovata o errore.")
+
+    @commands.command()
+    async def checkleak_manual(self, ctx):
+        update_stats('checkleak_manual')
+        await self.bot.send_translated(ctx, "Verifica violazioni manualmente su https://haveibeenpwned.com")
 
     @commands.command()
     async def metadata(self, ctx):
@@ -715,9 +735,9 @@ class Utilita(commands.Cog):
             color=discord.Color.dark_blue()
         )
         embed.add_field(name="Sviluppatori", value="Team Crypt0n", inline=False)
-        embed.add_field(name="Versione", value="2.1", inline=True)
+        embed.add_field(name="Versione", value="2.1 - Analisi e Protezione Avanzata", inline=True)
         embed.add_field(name="Supporto", value="[Server Discord](https://discord.gg/tuo_server)\n[GitHub](https://github.com/tuo_repo)", inline=True)
-        embed.add_field(name="Ringraziamenti", value="Realizzato con discord.py, googletrans.", inline=False)
+        embed.add_field(name="Ringraziamenti", value="Realizzato con discord.py, googletrans e il supporto di Grok (xAI).", inline=False)
         embed.set_footer(text=f"Crypt0n | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         embed.set_thumbnail(url="https://example.com/crypt0n_logo.png")
         await ctx.send(embed=embed)
@@ -731,9 +751,9 @@ class Utilita(commands.Cog):
         embed.add_field(name="Intelligenza Minacce", value="$threatip, $blacklist, $threatfeed", inline=False)
         embed.add_field(name="OSINT", value="$socialsearch", inline=False)
         embed.add_field(name="Monitoraggio", value="$monitor, $stopmonitor, $monitors, $stats, $report", inline=False)
-        embed.add_field(name="Comandi Base", value="$ipinfo, $dnslookup, $whois, $hash, $encode64, $decode64, $genpassword, $headers, $checkemail, $portscan, $analyzeurl, $passwordstrength, $cybernews, $checkleak, $metadata, $encrypt, $decrypt, $scanfile", inline=False)
+        embed.add_field(name="Comandi Base", value="$ipinfo, $dnslookup, $whois, $hash, $encode64, $decode64, $genpassword, $headers, $checkemail, $portscan, $analyzeurl, $passwordstrength, $cybernews, $checkleak, $checkleak_manual, $metadata, $encrypt, $decrypt, $scanfile", inline=False)
         embed.add_field(name="Moderazione", value="$ban, $kick, $antiraid, $setlogchannel", inline=False)
-        embed.add_field(name="Utilità", value="$setlanguage, $listlanguages, $translate, $setprefix, $userinfo, $serverinfo, $invite, $avatar, $credits", inline=False)
+        embed.add_field(name="Utilità", value="$setlanguage, $listlanguages, $translate, $setprefix, $userinfo, $serverinfo, $invite, $avatar, $credits, $help", inline=False)
         embed.set_footer(text=f"Crypt0n | Usa $credits per info | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await ctx.send(embed=embed)
 
